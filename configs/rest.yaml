@@ -1,0 +1,5 @@
+# All resting-state runs concatenated (ses-combined task-rest).
+extends: base.yaml
+name: rest
+conditions:
+  - task: rest

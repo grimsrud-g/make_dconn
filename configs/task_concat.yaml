@@ -1,0 +1,5 @@
+# All task runs concatenated (ses-combined task-task).
+extends: base.yaml
+name: task_concat
+conditions:
+  - task: task

@@ -1,0 +1,12 @@
+# One dconn per task, each concatenated across sessions.
+extends: base.yaml
+name: task_individual
+conditions:
+  - task: cuedTS
+  - task: directedForgetting
+  - task: flanker
+  - task: goNogo
+  - task: nBack
+  - task: shapeMatching
+  - task: spatialTS
+  - task: stopSignal

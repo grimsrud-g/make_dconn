@@ -1,0 +1,8 @@
+# Split halves of the concatenated task and rest data.
+extends: base.yaml
+name: split_half
+conditions:
+  - {task: task, split: 1}
+  - {task: task, split: 2}
+  - {task: rest, split: 1}
+  - {task: rest, split: 2}

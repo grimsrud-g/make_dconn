@@ -1,0 +1,47 @@
+# Shared settings for every dconn config. Condition configs `extends` this
+# file and add `name` and `conditions`. Values can use environment variables.
+
+paths:
+  xcpd_dir: /oak/stanford/groups/russpold/users/grimsrud/projects/pfm_compare/derivatives/xcpd_26.0.2/oct_2026_proc
+  output_dir: ${GROUP_SCRATCH}/grimsrud/pfm_compare/derivatives/make_dconn
+  work_dir: null  # null = node-local $L_SCRATCH_JOB
+
+inputs:
+  func_subdir: ""  # ses-combined files sit directly in sub-*/ses-combined/
+  space: fsLR
+  den: 91k
+  desc: denoised
+  surface_glob: "sub-{subject}_*hemi-{hemi}_space-fsLR_den-32k_desc-hcp_midthickness.surf.gii"
+
+session: combined
+subjects: [s03, s10, s19, s29, s43]
+
+censoring:
+  fd_column: framewise_displacement_filtered  # what XCP-D censored on
+  fd_threshold: 0.2          # keep FD <= 0.2 mm
+  min_contiguous_frames: 5   # drop surviving within-run stretches shorter than this
+  outlier_frames:
+    enabled: false           # Hermosillo 2024 MAD rule on frame-wise BOLD SD; off to match pypfm
+    n_mads: 3.0
+
+smoothing:
+  sigma_mm: 2.55       # same as MSC / pypfm (FWHM ~6 mm); null = no smoothing
+  merged_volume: true  # same flag pypfm passes to -cifti-smoothing
+
+correlation:
+  mem_limit_gb: 100
+
+keep_intermediates: false  # true = also save the censored(+smoothed) dtseries
+
+slurm:
+  modules: [devel, python/3.12.1, biology, workbench/1.3.1]
+  dconn:
+    partition: russpold
+    time: "04:00:00"
+    cpus_per_task: 16
+    mem: 128G
+  zscore:
+    partition: russpold
+    time: "02:00:00"
+    cpus_per_task: 8
+    mem: 64G
