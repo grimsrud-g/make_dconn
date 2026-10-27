@@ -66,7 +66,7 @@ uv run --frozen --offline make-dconn status configs/rest.yaml
 uv run --frozen --offline make-dconn submit configs/rest.yaml --stage dconn
 uv run --frozen --offline make-dconn submit configs/rest.yaml --stage both
 uv run --frozen --offline make-dconn submit configs/rest.yaml --stage zscore   # for dconns that already exist
-uv run --frozen --offline make-dconn submit configs/split_half.yaml --stage dconn --subjects s03 --dry-run
+uv run --frozen --offline make-dconn submit configs/split_half.yaml --stage dconn --subjects s03 --tasks rest --dry-run
 
 # run one unit in the current allocation (needs ~70 GB RAM for a dconn)
 uv run --frozen --offline make-dconn run configs/task_individual.yaml --subject s03 --task nBack

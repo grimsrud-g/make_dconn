@@ -40,7 +40,14 @@ def _run(args: argparse.Namespace) -> int:
 def _submit(args: argparse.Namespace) -> int:
     from make_dconn.submit import submit
 
-    submit(args.config, args.stage, subjects=args.subjects, overwrite=args.overwrite, dry_run=args.dry_run)
+    submit(
+        args.config,
+        args.stage,
+        subjects=args.subjects,
+        tasks=args.tasks,
+        overwrite=args.overwrite,
+        dry_run=args.dry_run,
+    )
     return 0
 
 
@@ -74,6 +81,7 @@ def build_parser() -> argparse.ArgumentParser:
     b.add_argument("config", type=Path)
     b.add_argument("--stage", choices=["dconn", "zscore", "both"], required=True)
     b.add_argument("--subjects", nargs="+", default=None, help="restrict to these subjects")
+    b.add_argument("--tasks", nargs="+", default=None, help="restrict to these tasks")
     b.add_argument("--overwrite", action="store_true", help="redo complete or stale outputs")
     b.add_argument("--dry-run", action="store_true", help="show what would be submitted")
     b.set_defaults(func=_submit)

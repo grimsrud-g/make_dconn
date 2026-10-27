@@ -63,3 +63,20 @@ def test_ambiguous_surface(tmp_path, base_raw):
     (anat / "sub-s03_acq-Y_run-1_hemi-L_space-fsLR_den-32k_desc-hcp_midthickness.surf.gii").touch()
     with pytest.raises(InputError, match="exactly one"):
         resolve_inputs(config, Unit("s03", "nBack"))
+
+
+def test_filter_units(base_raw):
+    from make_dconn.inputs import units_from_config
+    from make_dconn.pipeline import PipelineError
+    from make_dconn.submit import filter_units
+
+    base_raw["conditions"] = [{"task": "nBack"}, {"task": "flanker"}]
+    config = config_from_dict(base_raw)
+    units = units_from_config(config)
+    picked = filter_units(config, units, ["sub-s03"], ["nBack"])
+    assert picked == [Unit("s03", "nBack")]
+    assert len(filter_units(config, units, None, ["flanker"])) == 5
+    with pytest.raises(PipelineError, match="tasks not in config"):
+        filter_units(config, units, None, ["rest"])
+    with pytest.raises(PipelineError, match="subjects not in config"):
+        filter_units(config, units, ["s99"], None)

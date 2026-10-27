@@ -42,6 +42,25 @@ def select_units(config: DconnConfig, units: list[Unit], stage: str, overwrite: 
     return selected
 
 
+def filter_units(
+    config: DconnConfig, units: list[Unit], subjects: list[str] | None, tasks: list[str] | None
+) -> list[Unit]:
+    """Restrict to the given subjects and/or tasks; names not in the config are an error."""
+    if subjects:
+        wanted = {s.removeprefix("sub-") for s in subjects}
+        unknown = wanted - set(config.subjects)
+        if unknown:
+            raise PipelineError(f"subjects not in config: {sorted(unknown)}")
+        units = [u for u in units if u.subject in wanted]
+    if tasks:
+        wanted = set(tasks)
+        unknown = wanted - {c.task for c in config.conditions}
+        if unknown:
+            raise PipelineError(f"tasks not in config: {sorted(unknown)}")
+        units = [u for u in units if u.task in wanted]
+    return units
+
+
 def write_manifest(path: Path, units: list[Unit]) -> None:
     with open(path, "w", newline="") as f:
         w = csv.writer(f, delimiter="\t", lineterminator="\n")
@@ -102,6 +121,7 @@ def submit(
     stage: str,
     *,
     subjects: list[str] | None = None,
+    tasks: list[str] | None = None,
     overwrite: bool = False,
     dry_run: bool = False,
 ) -> None:
@@ -109,15 +129,9 @@ def submit(
     config = load_config(config_path)
     git = provenance.require_clean_commit()
     if not VENV_PYTHON.is_file():
-        raise PipelineError(f"{VENV_PYTHON} not found; run `uv sync --frozen` in {provenance.REPO_DIR}")
+        raise PipelineError(f"{VENV_PYTHON} not found; run `uv sync --frozen --offline` in {provenance.REPO_DIR}")
 
-    units = units_from_config(config)
-    if subjects:
-        wanted = {s.removeprefix("sub-") for s in subjects}
-        unknown = wanted - set(config.subjects)
-        if unknown:
-            raise PipelineError(f"subjects not in config: {sorted(unknown)}")
-        units = [u for u in units if u.subject in wanted]
+    units = filter_units(config, units_from_config(config), subjects, tasks)
 
     first = "zscore" if stage == "zscore" else "dconn"
     todo = select_units(config, units, first, overwrite)
