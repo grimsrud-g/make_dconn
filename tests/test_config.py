@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+from pathlib import Path
 
 import pytest
 import yaml
@@ -23,7 +24,7 @@ def test_repo_configs_load(monkeypatch, name, n_conditions):
     assert len(config.conditions) == n_conditions
     assert len(units_from_config(config)) == 5 * n_conditions
     assert str(config.paths.output_dir).startswith("/scratch/groups/test/")
-    assert processing_tag(config) == "fd0p2c5sm2p55"
+    assert processing_tag(config) == "fd0p2c5sm2p55fill"
 
 
 def test_unset_env_var_is_an_error(monkeypatch):
@@ -73,11 +74,20 @@ def test_sub_prefix_stripped(base_raw):
 
 def test_null_smoothing_tag(base_raw):
     base_raw["smoothing"]["sigma_mm"] = None
+    base_raw["smoothing"]["fill_missing"] = False
     assert processing_tag(config_from_dict(base_raw)) == "fd0p2c5sm0"
+
+
+def test_fill_requires_smoothing(base_raw):
+    base_raw["smoothing"]["sigma_mm"] = None
+    with pytest.raises(ConfigError, match="fill_missing needs smoothing"):
+        config_from_dict(base_raw)
 
 
 def test_outlier_tag(base_raw):
     base_raw["censoring"]["outlier_frames"]["enabled"] = True
+    assert processing_tag(config_from_dict(base_raw)) == "fd0p2c5sm2p55fillmad3"
+    base_raw["smoothing"]["fill_missing"] = False
     assert processing_tag(config_from_dict(base_raw)) == "fd0p2c5sm2p55mad3"
 
 
@@ -107,6 +117,9 @@ def test_params_hash_tracks_content_not_resources(base_raw):
     assert params_hash(config_from_dict(other)) == h
     other["smoothing"]["merged_volume"] = False
     assert params_hash(config_from_dict(other)) != h
+    filled = copy.deepcopy(base_raw)
+    filled["smoothing"]["fill_missing"] = False
+    assert params_hash(config_from_dict(filled)) != h
 
 
 def test_git_state_works_with_system_git(monkeypatch):
@@ -116,3 +129,12 @@ def test_git_state_works_with_system_git(monkeypatch):
     monkeypatch.setenv("PATH", "/usr/bin:/bin")
     state = provenance.git_state()
     assert len(state["commit"]) == 40
+
+
+def test_smooth_command_flags(tmp_path):
+    from make_dconn.workbench import smooth_command
+
+    base = smooth_command(Path("wb"), tmp_path / "i", tmp_path / "o", 2.55, Path("L"), Path("R"), True)
+    assert base[-1] == "-merged-volume" and "-fix-zeros-surface" not in base
+    fixed = smooth_command(Path("wb"), tmp_path / "i", tmp_path / "o", 2.55, Path("L"), Path("R"), True, fix_zeros_surface=True)
+    assert fixed == base + ["-fix-zeros-surface"]

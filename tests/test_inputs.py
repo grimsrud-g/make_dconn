@@ -31,10 +31,11 @@ def test_resolve_inputs_and_outputs(tmp_path, base_raw):
     assert inputs.surface_left.name.startswith("sub-s03_acq-X_run-1_hemi-L")
     out = resolve_outputs(config, Unit("s03", "nBack"))
     assert out.dconn.name == (
-        "sub-s03_ses-combined_task-nBack_space-fsLR_den-91k_desc-fd0p2c5sm2p55"
+        "sub-s03_ses-combined_task-nBack_space-fsLR_den-91k_desc-fd0p2c5sm2p55fill"
         "_stat-pearsoncorrelation_boldmap.dconn.nii"
     )
-    assert out.zscored.name.endswith("_desc-fd0p2c5sm2p55_stat-zscored_boldmap.dconn.nii")
+    assert out.zscored.name.endswith("_desc-fd0p2c5sm2p55fill_stat-zscored_boldmap.dconn.nii")
+    assert out.filled.name.endswith("_desc-fd0p2c5sm2p55fill_filledgrayordinates.tsv")
     assert out.dconn.parent == config.paths.output_dir / "sub-s03" / "ses-combined" / "func"
 
 

@@ -102,9 +102,17 @@ class Smoothing:
     # Required on purpose: every config must state whether it smooths.
     sigma_mm: float | None
     merged_volume: bool
+    # Fill surface vertices that have no data in any frame (XCP-D leaves some
+    # NaN): set to 0 and smooth with -fix-zeros-surface, keeping Workbench's
+    # extrapolated values, so the dconn has no NaN rows. false = leave NaN.
+    fill_missing: bool
 
     def __post_init__(self) -> None:
         _check(self.sigma_mm is None or self.sigma_mm > 0, "smoothing.sigma_mm must be > 0 or null")
+        _check(
+            not (self.fill_missing and self.sigma_mm is None),
+            "smoothing.fill_missing needs smoothing (sigma_mm) to extrapolate values",
+        )
 
 
 @dataclass(frozen=True)

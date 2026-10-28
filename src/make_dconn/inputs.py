@@ -41,6 +41,7 @@ class UnitOutputs:
     dconn: Path
     sidecar: Path
     censoring: Path
+    filled: Path
     zscored: Path
     zscored_sidecar: Path
 
@@ -102,12 +103,15 @@ def _num_tag(value: float) -> str:
 def processing_tag(config: DconnConfig) -> str:
     """BIDS ``desc`` value encoding every parameter that changes the dconn.
 
-    Example: fd0p2c5sm2p55 = FD <= 0.2, drop stretches < 5 frames, sigma 2.55.
-    A ``mad3`` suffix is added when outlier-frame removal is on.
+    Example: fd0p2c5sm2p55fill = FD <= 0.2, drop stretches < 5 frames, sigma 2.55,
+    missing vertices filled. A ``mad3`` suffix is added when outlier-frame
+    removal is on.
     """
     c = config.censoring
     sigma = config.smoothing.sigma_mm
     tag = f"fd{_num_tag(c.fd_threshold)}c{c.min_contiguous_frames}sm{_num_tag(sigma) if sigma else '0'}"
+    if config.smoothing.fill_missing:
+        tag += "fill"
     if c.outlier_frames.enabled:
         tag += f"mad{_num_tag(c.outlier_frames.n_mads)}"
     return tag
@@ -121,6 +125,7 @@ def resolve_outputs(config: DconnConfig, unit: Unit) -> UnitOutputs:
         dconn=out_dir / f"{stem}_stat-pearsoncorrelation_boldmap.dconn.nii",
         sidecar=out_dir / f"{stem}_stat-pearsoncorrelation_boldmap.json",
         censoring=out_dir / f"{stem}_censoring.tsv",
+        filled=out_dir / f"{stem}_filledgrayordinates.tsv",
         zscored=out_dir / f"{stem}_stat-zscored_boldmap.dconn.nii",
         zscored_sidecar=out_dir / f"{stem}_stat-zscored_boldmap.json",
     )

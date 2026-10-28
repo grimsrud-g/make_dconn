@@ -102,3 +102,52 @@ def test_write_censored_and_check(tmp_path):
     nib.Cifti2Image(bad, header=(brain, brain)).to_filename(bad_path)
     with pytest.raises(cifti.CiftiError, match="diagonal"):
         cifti.check_dconn(bad_path, out, n_probe_rows=brain.size)
+
+
+def test_find_missing_whole_columns_only():
+    brain = _brain()
+    data = np.random.default_rng(3).normal(size=(10, brain.size)).astype(np.float32)
+    data[:, [1, 5]] = np.nan
+    missing, n_zeros = cifti.find_missing(data, brain, chunk_cols=3)  # chunking must not matter
+    assert missing.tolist() == [1, 5] and n_zeros == 0
+    data[0, 2] = 0.0
+    assert cifti.find_missing(data, brain)[1] == 1
+    data[4, 3] = np.nan  # partly missing: a different problem, never filled
+    with pytest.raises(cifti.CiftiError, match="only some frames"):
+        cifti.find_missing(data, brain)
+
+
+def test_find_missing_rejects_subcortical():
+    brain = _brain()
+    data = np.ones((4, brain.size), dtype=np.float32)
+    data[:, brain.size - 1] = np.nan  # last grayordinate is volume
+    with pytest.raises(cifti.CiftiError, match="subcortical"):
+        cifti.find_missing(data, brain)
+
+
+def test_frame_sd_skips_missing_columns():
+    data = np.random.default_rng(4).normal(size=(7, 11)).astype(np.float32)
+    ref = np.delete(data, [2, 8], axis=1).std(axis=1, dtype=np.float64)
+    data[:, [2, 8]] = np.nan
+    np.testing.assert_allclose(cifti.frame_sd(data, exclude=np.array([2, 8]), chunk_rows=3), ref)
+
+
+def test_missing_tsv_and_require_finite(tmp_path):
+    brain = _brain()
+    out = tmp_path / "filled.tsv"
+    cifti.write_missing_tsv(brain, np.array([1, 5]), out)
+    assert out.read_text().splitlines() == [
+        "grayordinate\tstructure\tvertex",
+        "1\tCIFTI_STRUCTURE_CORTEX_LEFT\t1",
+        "5\tCIFTI_STRUCTURE_CORTEX_RIGHT\t1",
+    ]
+    series = nib.cifti2.SeriesAxis(start=0, step=1, size=6, unit="SECOND")
+    data = np.ones((6, brain.size), dtype=np.float32)
+    ok = tmp_path / "ok.dtseries.nii"
+    nib.Cifti2Image(data, header=(series, brain)).to_filename(ok)
+    cifti.require_finite(ok, chunk_rows=4)
+    data[5, 3] = np.nan
+    bad = tmp_path / "bad.dtseries.nii"
+    nib.Cifti2Image(data, header=(series, brain)).to_filename(bad)
+    with pytest.raises(cifti.CiftiError, match="non-finite"):
+        cifti.require_finite(bad, chunk_rows=4)

@@ -17,13 +17,31 @@ For each subject × condition (a *unit*):
      within each run, so the end of one run never joins the start of the next.
 2. **Smooth** the censored series: `wb_command -cifti-smoothing <in> 2.55 2.55
    COLUMN <out> -left-surface <L midthickness> -right-surface <R midthickness>
-   -merged-volume`. This is the same call pypfm uses (MSC convention, sigma in mm).
+   -merged-volume`. This is the same call pypfm uses (MSC convention, sigma in mm),
+   plus `-fix-zeros-surface` when there are missing vertices (see below).
 3. **Correlate**: `wb_command -cifti-correlation` gives Pearson r, with no Fisher z.
 4. **Z-score** (separate stage, run when needed): each of the 9 blocks (left
    cortex, right cortex and subcortex, paired with each other) is z-scored
    over all its elements. This reproduces `temp_match_pfm/code/zscore_dconn`
    (after Hermosillo et al. 2024) with the same maths, using about half the
    memory (float32, in place).
+
+### Missing vertices
+
+XCP-D leaves a fixed set of cortical vertices per subject NaN in every frame
+(460–598 per subject, about 1% of cortex, in the inferior medial temporal
+lobe). With `smoothing.fill_missing: true` (the default) they are set to 0
+and smoothed with `-fix-zeros-surface`, so Workbench ignores them in every
+average and fills them from their neighbours. The dconn therefore has no
+NaN rows, which ReproTM can't handle. Values at every other vertex are
+identical to smoothing without the fill. Without the fill, NaN would also
+spread to ~300–550 neighbouring real vertices, as it does in pypfm.
+
+The filled vertices carry **extrapolated, not measured** connectivity. Each
+dconn has a `_filledgrayordinates.tsv` listing them (and the count is in the
+sidecar), so you can exclude them when comparing methods. The code refuses
+to fill if a vertex is NaN in only some frames, if a missing grayordinate is
+subcortical, or if the real data contains exact zeros.
 
 Every parameter lives in a config file. No input path is hardcoded.
 
@@ -86,7 +104,7 @@ uv run --frozen --offline make-dconn run configs/task_individual.yaml --subject 
   run, output checks and the resolved config. The sidecar is written last;
   only a sidecar with `status: complete` marks a unit done.
 - **Parameter safety:** the output name's `desc` encodes the parameters
-  (e.g. `fd0p2c5sm2p55`), and a parameter hash in the sidecar catches any
+  (e.g. `fd0p2c5sm2p55fill`), and a parameter hash in the sidecar catches any
   other change. Outputs made with different parameters are never silently
   reused or overwritten (`--overwrite` is required).
 - **Censoring record:** a per-frame `_censoring.tsv` records FD and why each
@@ -97,11 +115,12 @@ uv run --frozen --offline make-dconn run configs/task_individual.yaml --subject 
 `<output_dir>/sub-<s>/ses-combined/func/`:
 
 ```
-sub-s03_ses-combined_task-nBack_space-fsLR_den-91k_desc-fd0p2c5sm2p55_stat-pearsoncorrelation_boldmap.dconn.nii
-sub-s03_ses-combined_task-nBack_space-fsLR_den-91k_desc-fd0p2c5sm2p55_stat-pearsoncorrelation_boldmap.json
-sub-s03_ses-combined_task-nBack_space-fsLR_den-91k_desc-fd0p2c5sm2p55_censoring.tsv
-sub-s03_ses-combined_task-nBack_space-fsLR_den-91k_desc-fd0p2c5sm2p55_stat-zscored_boldmap.dconn.nii
-sub-s03_ses-combined_task-nBack_space-fsLR_den-91k_desc-fd0p2c5sm2p55_stat-zscored_boldmap.json
+sub-s03_ses-combined_task-nBack_space-fsLR_den-91k_desc-fd0p2c5sm2p55fill_stat-pearsoncorrelation_boldmap.dconn.nii
+sub-s03_ses-combined_task-nBack_space-fsLR_den-91k_desc-fd0p2c5sm2p55fill_stat-pearsoncorrelation_boldmap.json
+sub-s03_ses-combined_task-nBack_space-fsLR_den-91k_desc-fd0p2c5sm2p55fill_censoring.tsv
+sub-s03_ses-combined_task-nBack_space-fsLR_den-91k_desc-fd0p2c5sm2p55fill_filledgrayordinates.tsv
+sub-s03_ses-combined_task-nBack_space-fsLR_den-91k_desc-fd0p2c5sm2p55fill_stat-zscored_boldmap.dconn.nii
+sub-s03_ses-combined_task-nBack_space-fsLR_den-91k_desc-fd0p2c5sm2p55fill_stat-zscored_boldmap.json
 ```
 
 Each dconn is about 33 GB. The default `output_dir` is on `$GROUP_SCRATCH`,

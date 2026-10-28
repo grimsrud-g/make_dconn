@@ -27,6 +27,11 @@ censoring:
 smoothing:
   sigma_mm: 2.55       # same as MSC / pypfm (FWHM ~6 mm); null = no smoothing
   merged_volume: true  # same flag pypfm passes to -cifti-smoothing
+  # XCP-D leaves ~1% of cortical vertices (inferior medial temporal) NaN in
+  # every frame. true = set them to 0 and add -fix-zeros-surface, so they are
+  # filled from their neighbours and the dconn has no NaN rows (ReproTM can't
+  # handle NaN rows). Each dconn gets a _filledgrayordinates.tsv listing them.
+  fill_missing: true
 
 correlation:
   mem_limit_gb: 100

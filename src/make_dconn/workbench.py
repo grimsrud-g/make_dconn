@@ -51,8 +51,14 @@ def smooth_command(
     surface_left: Path,
     surface_right: Path,
     merged_volume: bool,
+    fix_zeros_surface: bool = False,
 ) -> list[str]:
-    """Same call as pypfm (xcpd_inputs.smooth_cifti): sigma in mm, surface and volume."""
+    """Same call as pypfm (xcpd_inputs.smooth_cifti): sigma in mm, surface and volume.
+
+    ``fix_zeros_surface`` makes Workbench treat surface zeros as missing data
+    (left out of every average, and filled by extrapolation); used for the
+    vertices XCP-D leaves without data, which are set to 0 beforehand.
+    """
     cmd = [
         str(wb),
         "-cifti-smoothing",
@@ -68,6 +74,8 @@ def smooth_command(
     ]
     if merged_volume:
         cmd.append("-merged-volume")
+    if fix_zeros_surface:
+        cmd.append("-fix-zeros-surface")
     return cmd
 
 

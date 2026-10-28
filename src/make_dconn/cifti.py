@@ -30,9 +30,64 @@ def load_dtseries(path: Path) -> tuple[nib.Cifti2Image, np.ndarray]:
     return img, data
 
 
-def frame_sd(data: np.ndarray) -> np.ndarray:
-    """SD across grayordinates for each frame (float64 accumulation)."""
-    return data.std(axis=1, dtype=np.float64)
+def find_missing(
+    data: np.ndarray, brain: nib.cifti2.BrainModelAxis, chunk_cols: int = 8192
+) -> tuple[np.ndarray, int]:
+    """Grayordinates with no data, and the number of exact zeros in the real data.
+
+    XCP-D leaves some cortical vertices NaN in every frame (no BOLD coverage).
+    Returns their indices. Fails if a grayordinate is non-finite in only some
+    frames, because that is a different problem and must not be filled.
+    """
+    missing, partial, n_zeros = [], [], 0
+    for c0 in range(0, data.shape[1], chunk_cols):
+        block = data[:, c0 : c0 + chunk_cols]
+        finite = np.isfinite(block)
+        none = ~finite.any(axis=0)
+        some = ~finite.all(axis=0) & ~none
+        missing.extend((c0 + np.flatnonzero(none)).tolist())
+        partial.extend((c0 + np.flatnonzero(some)).tolist())
+        n_zeros += int(np.count_nonzero(block[finite] == 0))
+    if partial:
+        raise CiftiError(
+            f"{len(partial)} grayordinates are non-finite in only some frames (first: {partial[:10]})"
+        )
+    missing_idx = np.array(missing, dtype=int)
+    if missing_idx.size and brain.volume_mask[missing_idx].any():
+        raise CiftiError(
+            f"{int(brain.volume_mask[missing_idx].sum())} missing grayordinates are subcortical; "
+            "only surface vertices can be filled"
+        )
+    return missing_idx, n_zeros
+
+
+def write_missing_tsv(brain: nib.cifti2.BrainModelAxis, missing: np.ndarray, path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w") as f:
+        f.write("grayordinate\tstructure\tvertex\n")
+        for g in missing:
+            f.write(f"{int(g)}\t{brain.name[g]}\t{int(brain.vertex[g])}\n")
+
+
+def frame_sd(data: np.ndarray, exclude: np.ndarray | None = None, chunk_rows: int = 512) -> np.ndarray:
+    """SD across grayordinates for each frame (float64), skipping ``exclude`` columns."""
+    cols = np.ones(data.shape[1], dtype=bool)
+    if exclude is not None:
+        cols[exclude] = False
+    out = np.empty(data.shape[0])
+    for r0 in range(0, data.shape[0], chunk_rows):
+        out[r0 : r0 + chunk_rows] = data[r0 : r0 + chunk_rows][:, cols].std(axis=1, dtype=np.float64)
+    return out
+
+
+def require_finite(path: Path, chunk_rows: int = 512) -> None:
+    """Fail if a dtseries contains any non-finite value (read in frame chunks)."""
+    img = nib.load(path)
+    for r0 in range(0, img.shape[0], chunk_rows):
+        block = np.asarray(img.dataobj[r0 : r0 + chunk_rows])
+        if not np.isfinite(block).all():
+            cols = np.flatnonzero(~np.isfinite(block).all(axis=0))
+            raise CiftiError(f"{path}: non-finite values at {cols.size} grayordinates (first: {cols[:10].tolist()})")
 
 
 def write_censored(img: nib.Cifti2Image, kept: np.ndarray, out: Path) -> None:
@@ -50,13 +105,20 @@ def n_frames(path: Path) -> int:
     return int(nib.load(path).shape[0])
 
 
-def check_dconn(dconn: Path, reference: Path, n_probe_rows: int = 12) -> dict:
+def check_dconn(
+    dconn: Path,
+    reference: Path,
+    n_probe_rows: int = 12,
+    extra_rows: np.ndarray | None = None,
+    require_all_finite: bool = False,
+) -> dict:
     """Header and spot-value checks on a finished dconn without loading all of it.
 
     Fails if the matrix is not square, its grayordinates differ from the
     input dtseries, any probe-row value lies outside [-1, 1], or a finite
-    diagonal value is not 1. NaNs (zero-variance grayordinates) are counted,
-    not treated as failures.
+    diagonal value is not 1. NaNs are counted; with ``require_all_finite``
+    any NaN in a probe row is a failure. ``extra_rows`` (e.g. filled
+    vertices) are probed in addition to the evenly spaced rows.
     """
     img = nib.load(dconn)
     ref_brain = nib.load(reference).header.get_axis(1)
@@ -67,11 +129,15 @@ def check_dconn(dconn: Path, reference: Path, n_probe_rows: int = 12) -> dict:
         if img.header.get_axis(axis) != ref_brain:
             raise CiftiError(f"{dconn}: axis {axis} grayordinates differ from {reference}")
     rows = np.linspace(0, n - 1, n_probe_rows).astype(int)
+    if extra_rows is not None and len(extra_rows):
+        rows = np.unique(np.concatenate([rows, np.asarray(extra_rows, dtype=int)]))
     diag, n_nan = [], 0
     for i in rows:
         row = np.asarray(img.dataobj[i, :], dtype=np.float64)
         finite = row[np.isfinite(row)]
         n_nan += row.size - finite.size
+        if require_all_finite and finite.size != row.size:
+            raise CiftiError(f"{dconn}: row {i} has {row.size - finite.size} non-finite values")
         if finite.size and (finite.min() < -1 - 1e-5 or finite.max() > 1 + 1e-5):
             raise CiftiError(f"{dconn}: row {i} outside [-1, 1] (min {finite.min()}, max {finite.max()})")
         diag.append(float(row[i]))

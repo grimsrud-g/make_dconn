@@ -110,9 +110,18 @@ def run_dconn(
 
     img, data = cifti.load_dtseries(inputs.dtseries)
     n_frames, n_gray = data.shape
+    brain = img.header.get_axis(1)
+    missing, n_exact_zeros = cifti.find_missing(data, brain)
+    fill = config.smoothing.fill_missing and missing.size > 0
+    log.info("%s: %d grayordinates have no data in any frame", unit.label, missing.size)
+    if fill and n_exact_zeros:
+        # -fix-zeros-surface would treat these real values as missing too
+        raise PipelineError(f"{unit.label}: {n_exact_zeros} exact zeros in the data; cannot fill safely")
+    if missing.size and not config.smoothing.fill_missing:
+        log.warning("%s: leaving %d missing grayordinates as NaN (NaN rows in the dconn)", unit.label, missing.size)
     fd = load_fd(inputs.motion, config.censoring.fd_column)
     runs = load_runs(inputs.boundaries, n_frames)
-    sd = cifti.frame_sd(data) if config.censoring.outlier_frames.enabled else None
+    sd = cifti.frame_sd(data, exclude=missing) if config.censoring.outlier_frames.enabled else None
     result = censor(fd, runs, config.censoring, frame_sd=sd)
     summary = result.summary()
     log.info(
@@ -127,7 +136,11 @@ def run_dconn(
 
     kept = data[result.keep]
     del data
-    n_zero_var = int(np.count_nonzero(kept.std(axis=0) == 0))
+    if fill:
+        kept[:, missing] = 0.0  # -fix-zeros-surface reads zero as "no data"
+    present = np.ones(n_gray, dtype=bool)
+    present[missing] = False
+    n_zero_var = int(np.count_nonzero(kept.std(axis=0)[present] == 0))
     if n_zero_var:
         log.warning("%s: %d grayordinates have zero variance after censoring", unit.label, n_zero_var)
 
@@ -151,10 +164,13 @@ def run_dconn(
                 inputs.surface_left,
                 inputs.surface_right,
                 config.smoothing.merged_volume,
+                fix_zeros_surface=fill,
             )
             workbench.run(cmd)
             commands.append(cmd)
             corr_input = smoothed
+            if fill:
+                cifti.require_finite(smoothed)
         if cifti.n_frames(corr_input) != summary["n_frames_kept"]:
             raise PipelineError(f"{corr_input} does not have the expected number of frames")
 
@@ -162,7 +178,12 @@ def run_dconn(
         cmd = workbench.correlation_command(wb, corr_input, dconn_tmp, config.correlation.mem_limit_gb)
         workbench.run(cmd)
         commands.append(cmd)
-        checks = cifti.check_dconn(dconn_tmp, corr_input)
+        checks = cifti.check_dconn(
+            dconn_tmp,
+            corr_input,
+            extra_rows=missing[np.linspace(0, missing.size - 1, min(4, missing.size)).astype(int)],
+            require_all_finite=fill,
+        )
 
         _publish(dconn_tmp, out.dconn)
         if config.keep_intermediates:
@@ -170,6 +191,7 @@ def run_dconn(
             _publish(corr_input, out.dconn.with_name(f"{stem}_bold.dtseries.nii"))
 
     result.write_tsv(out.censoring, config.censoring.fd_column)
+    cifti.write_missing_tsv(brain, missing, out.filled)
     provenance.write_json(
         out.sidecar,
         {
@@ -193,6 +215,16 @@ def run_dconn(
             },
             "censoring": summary,
             "censoring_file": out.censoring.name,
+            "missing_grayordinates": {
+                "n": int(missing.size),
+                "filled": bool(fill),
+                "method": (
+                    "set to 0, smoothed with -fix-zeros-surface (values extrapolated from neighbours)"
+                    if fill
+                    else "left as NaN"
+                ),
+                "file": out.filled.name,
+            },
             "zero_variance_grayordinates": n_zero_var,
             "commands": commands,
             "output_checks": checks,
