@@ -28,16 +28,22 @@ def now() -> str:
 
 
 def git_state() -> dict:
+    # cwd= rather than `git -C`: jobs run after `ml purge`, where the system
+    # git (1.8.3 on Sherlock) predates -C.
     def git(*args: str) -> str:
         return subprocess.run(
-            ["git", "-C", str(REPO_DIR), *args], capture_output=True, text=True, check=True
+            ["git", *args], cwd=REPO_DIR, capture_output=True, text=True, check=True
         ).stdout.strip()
 
     try:
         commit = git("rev-parse", "HEAD")
         dirty = bool(git("status", "--porcelain"))
-    except (subprocess.CalledProcessError, FileNotFoundError) as err:
-        raise ProvenanceError(f"cannot read git state of {REPO_DIR}: {err}") from err
+    except subprocess.CalledProcessError as err:
+        raise ProvenanceError(
+            f"cannot read git state of {REPO_DIR}: {err}\n{err.stderr.strip()}"
+        ) from err
+    except FileNotFoundError as err:
+        raise ProvenanceError(f"git not found while reading {REPO_DIR}: {err}") from err
     return {"commit": commit, "dirty": dirty}
 
 

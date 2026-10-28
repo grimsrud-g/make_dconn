@@ -107,3 +107,12 @@ def test_params_hash_tracks_content_not_resources(base_raw):
     assert params_hash(config_from_dict(other)) == h
     other["smoothing"]["merged_volume"] = False
     assert params_hash(config_from_dict(other)) != h
+
+
+def test_git_state_works_with_system_git(monkeypatch):
+    """Jobs run after `ml purge`, where only the old system git is on PATH."""
+    from make_dconn import provenance
+
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    state = provenance.git_state()
+    assert len(state["commit"]) == 40
