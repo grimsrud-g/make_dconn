@@ -148,6 +148,7 @@ def run_dconn(
     # censored + smoothed dtseries and the dconn, with 10% headroom
     _require_space(root, int(1.1 * (2 * kept.nbytes + 4 * n_gray * n_gray)))
     commands: list[list[str]] = []
+    fill_methods: dict[int, str] = {}
     with tempfile.TemporaryDirectory(dir=root, prefix="make_dconn_") as tmp_name:
         tmp = Path(tmp_name)
         censored = tmp / "censored.dtseries.nii"
@@ -171,8 +172,37 @@ def run_dconn(
             corr_input = smoothed
             if fill:
                 cifti.require_finite(smoothed)
+                # Missing vertices beyond the kernel's reach are still 0 in every frame.
+                unfilled = np.intersect1d(cifti.constant_columns(smoothed), missing)
+                fill_methods = {int(g): "smoothing" for g in missing}
+                if unfilled.size:
+                    log.info("%s: %d missing vertices out of the kernel's reach; dilating", unit.label, unfilled.size)
+                    roi = tmp / "unfilled.dscalar.nii"
+                    cifti.write_roi(brain, unfilled, roi)
+                    dilated = tmp / "dilated.dtseries.nii"
+                    cmd = workbench.dilate_command(
+                        wb,
+                        smoothed,
+                        dilated,
+                        config.smoothing.fill_dilate_mm,
+                        inputs.surface_left,
+                        inputs.surface_right,
+                        roi,
+                    )
+                    workbench.run(cmd)
+                    commands.append(cmd)
+                    cifti.require_finite(dilated)
+                    corr_input = dilated
+                    fill_methods.update({int(g): "dilation" for g in unfilled})
         if cifti.n_frames(corr_input) != summary["n_frames_kept"]:
             raise PipelineError(f"{corr_input} does not have the expected number of frames")
+        constant = cifti.constant_columns(corr_input)
+        if constant.size and (fill or np.setdiff1d(constant, missing).size):
+            # constant series correlate as NaN; catch it before the long correlation step
+            raise PipelineError(
+                f"{unit.label}: {constant.size} grayordinates are constant in {corr_input.name} "
+                f"(first: {constant[:10].tolist()})"
+            )
 
         dconn_tmp = tmp / out.dconn.name
         cmd = workbench.correlation_command(wb, corr_input, dconn_tmp, config.correlation.mem_limit_gb)
@@ -191,7 +221,7 @@ def run_dconn(
             _publish(corr_input, out.dconn.with_name(f"{stem}_bold.dtseries.nii"))
 
     result.write_tsv(out.censoring, config.censoring.fd_column)
-    cifti.write_missing_tsv(brain, missing, out.filled)
+    cifti.write_missing_tsv(brain, missing, out.filled, fill_methods)
     provenance.write_json(
         out.sidecar,
         {
@@ -218,8 +248,12 @@ def run_dconn(
             "missing_grayordinates": {
                 "n": int(missing.size),
                 "filled": bool(fill),
+                "n_filled_by_smoothing": sum(m == "smoothing" for m in fill_methods.values()),
+                "n_filled_by_dilation": sum(m == "dilation" for m in fill_methods.values()),
                 "method": (
-                    "set to 0, smoothed with -fix-zeros-surface (values extrapolated from neighbours)"
+                    "set to 0 and smoothed with -fix-zeros-surface (extrapolated from neighbours); "
+                    "any still constant (beyond the kernel's reach) then filled by -cifti-dilate "
+                    f"within {config.smoothing.fill_dilate_mm:g} mm"
                     if fill
                     else "left as NaN"
                 ),

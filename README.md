@@ -30,16 +30,26 @@ For each subject × condition (a *unit*):
 
 XCP-D leaves a fixed set of cortical vertices per subject NaN in every frame
 (460–598 per subject, about 1% of cortex, in the inferior medial temporal
-lobe). With `smoothing.fill_missing: true` (the default) they are set to 0
-and smoothed with `-fix-zeros-surface`, so Workbench ignores them in every
-average and fills them from their neighbours. The dconn therefore has no
-NaN rows, which ReproTM can't handle. Values at every other vertex are
-identical to smoothing without the fill. Without the fill, NaN would also
-spread to ~300–550 neighbouring real vertices, as it does in pypfm.
+lobe). With `smoothing.fill_missing: true` (the default) they are filled in
+two steps, so the dconn has no NaN rows (which ReproTM can't handle):
 
-The filled vertices carry **extrapolated, not measured** connectivity. Each
-dconn has a `_filledgrayordinates.tsv` listing them (and the count is in the
-sidecar), so you can exclude them when comparing methods. The code refuses
+1. They are set to 0 and smoothed with `-fix-zeros-surface`, so Workbench
+   leaves them out of every average and extrapolates values into those it
+   can reach (about half of them).
+2. The rest are still 0 in every frame (constant series give NaN
+   correlations), so they are filled with `wb_command -cifti-dilate
+   -bad-brainordinate-roi` within `smoothing.fill_dilate_mm` (20 mm; 15 mm
+   reaches every gap in all 5 subjects). Only those vertices change.
+
+Values at every other vertex are identical to smoothing without the fill.
+Without the fill, NaN would also spread to ~300–550 neighbouring real
+vertices, as it does in pypfm. Before the correlation step the code checks
+that no grayordinate is constant or non-finite.
+
+The filled vertices carry **extrapolated, not measured** connectivity (they
+correlate very strongly with their neighbours). Each dconn has a
+`_filledgrayordinates.tsv` listing them and how each was filled (the counts
+are in the sidecar), so you can exclude them when comparing methods. The code refuses
 to fill if a vertex is NaN in only some frames, if a missing grayordinate is
 subcortical, or if the real data contains exact zeros.
 

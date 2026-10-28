@@ -106,9 +106,13 @@ class Smoothing:
     # NaN): set to 0 and smooth with -fix-zeros-surface, keeping Workbench's
     # extrapolated values, so the dconn has no NaN rows. false = leave NaN.
     fill_missing: bool
+    # Missing vertices too far inside a gap for the smoothing kernel to reach
+    # stay 0; they are then filled with -cifti-dilate over this distance.
+    fill_dilate_mm: float
 
     def __post_init__(self) -> None:
         _check(self.sigma_mm is None or self.sigma_mm > 0, "smoothing.sigma_mm must be > 0 or null")
+        _check(self.fill_dilate_mm > 0, "smoothing.fill_dilate_mm must be > 0")
         _check(
             not (self.fill_missing and self.sigma_mm is None),
             "smoothing.fill_missing needs smoothing (sigma_mm) to extrapolate values",

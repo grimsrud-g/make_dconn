@@ -138,3 +138,11 @@ def test_smooth_command_flags(tmp_path):
     assert base[-1] == "-merged-volume" and "-fix-zeros-surface" not in base
     fixed = smooth_command(Path("wb"), tmp_path / "i", tmp_path / "o", 2.55, Path("L"), Path("R"), True, fix_zeros_surface=True)
     assert fixed == base + ["-fix-zeros-surface"]
+
+
+def test_dilate_command(tmp_path):
+    from make_dconn.workbench import dilate_command
+
+    cmd = dilate_command(Path("wb"), Path("in"), Path("out"), 10.0, Path("L"), Path("R"), Path("roi"))
+    assert cmd[:7] == ["wb", "-cifti-dilate", "in", "COLUMN", "10", "0", "out"]
+    assert cmd[-2:] == ["-bad-brainordinate-roi", "roi"]

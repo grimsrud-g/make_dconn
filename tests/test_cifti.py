@@ -135,11 +135,11 @@ def test_frame_sd_skips_missing_columns():
 def test_missing_tsv_and_require_finite(tmp_path):
     brain = _brain()
     out = tmp_path / "filled.tsv"
-    cifti.write_missing_tsv(brain, np.array([1, 5]), out)
+    cifti.write_missing_tsv(brain, np.array([1, 5]), out, {1: "smoothing", 5: "dilation"})
     assert out.read_text().splitlines() == [
-        "grayordinate\tstructure\tvertex",
-        "1\tCIFTI_STRUCTURE_CORTEX_LEFT\t1",
-        "5\tCIFTI_STRUCTURE_CORTEX_RIGHT\t1",
+        "grayordinate\tstructure\tvertex\tfill_method",
+        "1\tCIFTI_STRUCTURE_CORTEX_LEFT\t1\tsmoothing",
+        "5\tCIFTI_STRUCTURE_CORTEX_RIGHT\t1\tdilation",
     ]
     series = nib.cifti2.SeriesAxis(start=0, step=1, size=6, unit="SECOND")
     data = np.ones((6, brain.size), dtype=np.float32)
@@ -151,3 +151,21 @@ def test_missing_tsv_and_require_finite(tmp_path):
     nib.Cifti2Image(data, header=(series, brain)).to_filename(bad)
     with pytest.raises(cifti.CiftiError, match="non-finite"):
         cifti.require_finite(bad, chunk_rows=4)
+
+
+def test_constant_columns_and_roi(tmp_path):
+    brain = _brain()
+    series = nib.cifti2.SeriesAxis(start=0, step=1, size=9, unit="SECOND")
+    data = np.random.default_rng(5).normal(size=(9, brain.size)).astype(np.float32)
+    data[:, 2] = 0.0
+    data[:, 7] = 3.5
+    data[8, 4] = data[0, 4] = 1.0  # varies: not constant
+    f = tmp_path / "x.dtseries.nii"
+    nib.Cifti2Image(data, header=(series, brain)).to_filename(f)
+    assert cifti.constant_columns(f, chunk_rows=4).tolist() == [2, 7]
+
+    roi = tmp_path / "roi.dscalar.nii"
+    cifti.write_roi(brain, np.array([2, 7]), roi)
+    img = nib.load(roi)
+    assert img.header.get_axis(1) == brain
+    assert np.flatnonzero(np.asarray(img.dataobj)[0]).tolist() == [2, 7]

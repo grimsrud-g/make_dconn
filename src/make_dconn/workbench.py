@@ -79,6 +79,33 @@ def smooth_command(
     return cmd
 
 
+def dilate_command(
+    wb: Path,
+    dtseries_in: Path,
+    dtseries_out: Path,
+    surface_mm: float,
+    surface_left: Path,
+    surface_right: Path,
+    bad_roi: Path,
+) -> list[str]:
+    """Replace only the vertices in ``bad_roi`` with a distance-weighted average of nearby good ones."""
+    return [
+        str(wb),
+        "-cifti-dilate",
+        str(dtseries_in),
+        "COLUMN",
+        f"{surface_mm:g}",
+        "0",
+        str(dtseries_out),
+        "-left-surface",
+        str(surface_left),
+        "-right-surface",
+        str(surface_right),
+        "-bad-brainordinate-roi",
+        str(bad_roi),
+    ]
+
+
 def correlation_command(wb: Path, dtseries_in: Path, dconn_out: Path, mem_limit_gb: float) -> list[str]:
     """Pearson r between all grayordinates (no Fisher z)."""
     return [

@@ -32,6 +32,9 @@ smoothing:
   # filled from their neighbours and the dconn has no NaN rows (ReproTM can't
   # handle NaN rows). Each dconn gets a _filledgrayordinates.tsv listing them.
   fill_missing: true
+  # Missing vertices the smoothing kernel can't reach stay 0 (constant, so
+  # NaN correlations); those are filled by -cifti-dilate within this distance.
+  fill_dilate_mm: 20  # 15 mm reaches every gap in all 5 subjects (measured 2026-10-27)
 
 correlation:
   mem_limit_gb: 100

@@ -61,12 +61,35 @@ def find_missing(
     return missing_idx, n_zeros
 
 
-def write_missing_tsv(brain: nib.cifti2.BrainModelAxis, missing: np.ndarray, path: Path) -> None:
+def write_missing_tsv(
+    brain: nib.cifti2.BrainModelAxis, missing: np.ndarray, path: Path, methods: dict[int, str] | None = None
+) -> None:
+    """One row per missing grayordinate; ``methods`` maps index -> how it was filled."""
     path.parent.mkdir(parents=True, exist_ok=True)
+    methods = methods or {}
     with open(path, "w") as f:
-        f.write("grayordinate\tstructure\tvertex\n")
+        f.write("grayordinate\tstructure\tvertex\tfill_method\n")
         for g in missing:
-            f.write(f"{int(g)}\t{brain.name[g]}\t{int(brain.vertex[g])}\n")
+            f.write(f"{int(g)}\t{brain.name[g]}\t{int(brain.vertex[g])}\t{methods.get(int(g), 'n/a')}\n")
+
+
+def write_roi(brain: nib.cifti2.BrainModelAxis, indices: np.ndarray, path: Path) -> None:
+    """Single-map dscalar with 1 at ``indices`` (for -bad-brainordinate-roi)."""
+    roi = np.zeros((1, brain.size), dtype=np.float32)
+    roi[0, indices] = 1.0
+    nib.Cifti2Image(roi, header=(nib.cifti2.ScalarAxis(["roi"]), brain)).to_filename(path)
+
+
+def constant_columns(path: Path, chunk_rows: int = 512) -> np.ndarray:
+    """Grayordinates whose value never changes over frames (they give NaN correlations)."""
+    img = nib.load(path)
+    lo = hi = None
+    for r0 in range(0, img.shape[0], chunk_rows):
+        block = np.asarray(img.dataobj[r0 : r0 + chunk_rows])
+        bmin, bmax = block.min(axis=0), block.max(axis=0)
+        lo = bmin if lo is None else np.minimum(lo, bmin)
+        hi = bmax if hi is None else np.maximum(hi, bmax)
+    return np.flatnonzero(hi == lo)
 
 
 def frame_sd(data: np.ndarray, exclude: np.ndarray | None = None, chunk_rows: int = 512) -> np.ndarray:
