@@ -81,13 +81,21 @@ def _check_existing(config: DconnConfig, unit: Unit, stage: str, overwrite: bool
     return False
 
 
-def _code_state(allow_dirty: bool, expected_commit: str | None) -> dict:
+def _code_state(allow_dirty: bool, code_state: dict | None) -> dict:
+    """Code provenance for the sidecar.
+
+    Array jobs pass ``code_state``: they run a verified snapshot of the
+    submitted commit (see submit.run_array_task), so the live repo is not
+    consulted. Interactive runs check the repo itself.
+    """
+    if code_state is not None:
+        return code_state
     if allow_dirty:
         state = provenance.git_state()
         if state["dirty"]:
             log.warning("running with uncommitted code changes (--allow-dirty)")
         return state
-    return provenance.require_clean_commit(expected_commit)
+    return provenance.require_clean_commit()
 
 
 def run_dconn(
@@ -96,11 +104,11 @@ def run_dconn(
     *,
     overwrite: bool = False,
     allow_dirty: bool = False,
-    expected_commit: str | None = None,
+    code_state: dict | None = None,
 ) -> None:
     if _check_existing(config, unit, "dconn", overwrite):
         return
-    git = _code_state(allow_dirty, expected_commit)
+    git = _code_state(allow_dirty, code_state)
     started = provenance.now()
     inputs = resolve_inputs(config, unit)
     out = resolve_outputs(config, unit)
@@ -274,13 +282,13 @@ def run_zscore(
     *,
     overwrite: bool = False,
     allow_dirty: bool = False,
-    expected_commit: str | None = None,
+    code_state: dict | None = None,
 ) -> None:
     if _check_existing(config, unit, "zscore", overwrite):
         return
     if stage_status(config, unit, "dconn") != "complete":
         raise PipelineError(f"{unit.label}: the dconn is not complete; run the dconn stage first")
-    git = _code_state(allow_dirty, expected_commit)
+    git = _code_state(allow_dirty, code_state)
     started = provenance.now()
     out = resolve_outputs(config, unit)
     root = work_root(config)

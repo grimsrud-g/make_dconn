@@ -5,7 +5,10 @@ Layout of a run directory, ``<output_dir>/_runs/<name>_<stage>_<timestamp>/``:
     config.yaml      fully resolved config the jobs read (later edits to the
                      source config cannot change a submitted run)
     manifest.tsv     one row per array index: subject, task, split
-    submission.json  code commit, sbatch commands, job ids
+    code/src/        the package as committed at submission (``git archive``);
+                     jobs import this copy, so later edits or commits in the
+                     repo cannot change what a queued job runs
+    submission.json  code commit, snapshot digest, sbatch commands, job ids
     logs/            Slurm stdout/stderr, one file per array task
 """
 
@@ -14,12 +17,13 @@ from __future__ import annotations
 import csv
 import logging
 import subprocess
+from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
 
 from make_dconn import provenance
 from make_dconn.config import DconnConfig, SlurmResources, dump_config, load_config
-from make_dconn.inputs import Unit, resolve_inputs, units_from_config
+from make_dconn.inputs import Unit, resolve_inputs, resolve_outputs, units_from_config
 from make_dconn.pipeline import PipelineError, run_dconn, run_zscore, stage_status
 
 log = logging.getLogger(__name__)
@@ -107,13 +111,53 @@ def _sbatch_command(
 
 
 def _make_run_dir(config: DconnConfig, stage: str, units: list[Unit], extra: dict) -> Path:
+    """Create the run directory; adds ``code_snapshot`` to ``extra``."""
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     run_dir = config.paths.output_dir / "_runs" / f"{config.name}_{stage}_{stamp}"
     (run_dir / "logs").mkdir(parents=True)
     (run_dir / "config.yaml").write_text(dump_config(config))
     write_manifest(run_dir / "manifest.tsv", units)
+    digest = provenance.snapshot_code(extra["git"]["commit"], run_dir / "code")
+    extra["code_snapshot"] = {"path": "code/src", "sha256": digest}
     provenance.write_json(run_dir / "submission.json", {"stage": stage, "created": provenance.now(), **extra})
     return run_dir
+
+
+def parse_active_tasks(squeue_ids: Iterable[str], job_id: str) -> list[int]:
+    """Array indices of ``job_id`` in ``squeue -r -o %i`` output (one id per array task)."""
+    prefix = f"{job_id}_"
+    return sorted(int(i[len(prefix):]) for i in squeue_ids if i.startswith(prefix) and i[len(prefix):].isdigit())
+
+
+def _my_queued_task_ids() -> list[str]:
+    try:
+        out = subprocess.run(["squeue", "--me", "-h", "-r", "-o", "%i"], capture_output=True, text=True, check=True)
+    except (subprocess.CalledProcessError, FileNotFoundError) as err:
+        # Without the queue we cannot rule out duplicates, so do not submit.
+        raise PipelineError(f"cannot read the Slurm queue to check for duplicates: {err}") from err
+    return out.stdout.split()
+
+
+def active_outputs(config: DconnConfig, stage: str, queued: list[str] | None = None) -> dict[Path, str]:
+    """Outputs of ``stage`` that a queued or running task from an earlier run will write.
+
+    Maps output path -> Slurm task id, so ``submit`` never queues a second
+    job for the same output.
+    """
+    queued = _my_queued_task_ids() if queued is None else queued
+    active: dict[Path, str] = {}
+    for meta_path in sorted((config.paths.output_dir / "_runs").glob("*/submission.json")):
+        meta = provenance.read_json(meta_path)
+        if not meta or meta.get("stage") != stage or "job_id" not in meta:
+            continue
+        indices = parse_active_tasks(queued, meta["job_id"])
+        if not indices:
+            continue
+        run_config = load_config(meta_path.parent / "config.yaml")
+        for index in indices:
+            out = resolve_outputs(run_config, read_manifest_row(meta_path.parent / "manifest.tsv", index))
+            active[out.dconn if stage == "dconn" else out.zscored] = f"{meta['job_id']}_{index}"
+    return active
 
 
 def submit(
@@ -142,8 +186,19 @@ def submit(
         not_ready = [u.label for u in todo if stage_status(config, u, "dconn") != "complete"]
         if not_ready:
             raise PipelineError(f"dconn not complete for: {not_ready}; use --stage both")
+    active = active_outputs(config, first)
+    if active:
+        kept = []
+        for unit in todo:
+            out = resolve_outputs(config, unit)
+            task = active.get(out.dconn if first == "dconn" else out.zscored)
+            if task:
+                log.info("skipping %s: already queued or running as %s", unit.label, task)
+            else:
+                kept.append(unit)
+        todo = kept
     if not todo:
-        log.info("nothing to do: every selected unit is already complete")
+        log.info("nothing to do: every selected unit is complete, queued or running")
         return
 
     log.info("%d unit(s) to run:", len(todo))
@@ -174,8 +229,23 @@ def run_array_task(run_dir: Path, index: int) -> None:
     meta = provenance.read_json(run_dir / "submission.json")
     if meta is None:
         raise PipelineError(f"{run_dir}/submission.json missing")
+    snapshot = run_dir / "code" / "src"
+    import make_dconn
+
+    running = Path(make_dconn.__file__).resolve().parent
+    if running != (snapshot / "make_dconn").resolve():
+        raise PipelineError(f"job imported make_dconn from {running}, not the run's snapshot {snapshot}")
+    digest = provenance.tree_digest(snapshot)
+    if digest != meta["code_snapshot"]["sha256"]:
+        raise PipelineError(f"code snapshot in {snapshot} was modified after submission")
+    code_state = {
+        "commit": meta["git"]["commit"],
+        "dirty": False,
+        "source": "run snapshot (git archive of the commit at submission)",
+        "snapshot_sha256": digest,
+    }
     config = load_config(run_dir / "config.yaml")
     unit = read_manifest_row(run_dir / "manifest.tsv", index)
-    log.info("array task %d: %s, stage %s", index, unit.label, meta["stage"])
+    log.info("array task %d: %s, stage %s, code %s", index, unit.label, meta["stage"], code_state["commit"][:7])
     runner = run_dconn if meta["stage"] == "dconn" else run_zscore
-    runner(config, unit, overwrite=meta["overwrite"], expected_commit=meta["git"]["commit"])
+    runner(config, unit, overwrite=meta["overwrite"], code_state=code_state)

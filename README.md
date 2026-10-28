@@ -102,8 +102,12 @@ uv run --frozen --offline make-dconn run configs/task_individual.yaml --subject 
 
 ## Reproducibility
 
-- **Code:** `submit` refuses to run with uncommitted changes, and each job
-  checks that the code is still at the commit it was submitted with.
+- **Code:** `submit` refuses to run with uncommitted changes. It copies the
+  committed `src/` into the run directory (`code/src`, via `git archive`),
+  and every job imports that frozen copy and checks its sha256. Editing or
+  committing in the repo while jobs are queued can't change or break them.
+- **No duplicates:** `submit` checks the Slurm queue and skips any unit that
+  a queued or running task from an earlier run is already producing.
 - **Frozen runs:** `submit` writes a run directory under
   `<output_dir>/_runs/` holding the fully resolved config, the manifest, the
   code commit and the Slurm logs. Jobs read the frozen config, so editing a

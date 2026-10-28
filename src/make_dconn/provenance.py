@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
 import platform
 import shutil
 import socket
 import subprocess
+import tarfile
 from datetime import datetime, timezone
 from importlib import metadata
 from pathlib import Path
@@ -60,6 +62,31 @@ def require_clean_commit(expected: str | None = None) -> dict:
             "the code changed after submission"
         )
     return state
+
+
+def tree_digest(root: Path) -> str:
+    """sha256 over every file under ``root`` (relative path + contents), ignoring __pycache__."""
+    h = hashlib.sha256()
+    for path in sorted(root.rglob("*")):
+        if path.is_file() and "__pycache__" not in path.parts:
+            h.update(str(path.relative_to(root)).encode() + b"\0")
+            h.update(path.read_bytes() + b"\0")
+    return h.hexdigest()
+
+
+def snapshot_code(commit: str, dest: Path) -> str:
+    """Extract ``src/`` as committed at ``commit`` into ``dest/src``; return its digest.
+
+    Jobs import this frozen copy, so editing or committing in the repo while
+    jobs are queued cannot change the code they run.
+    """
+    archive = subprocess.run(
+        ["git", "archive", "--format=tar", commit, "src"], cwd=REPO_DIR, capture_output=True, check=True
+    ).stdout
+    dest.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
+        tar.extractall(dest, filter="data")
+    return tree_digest(dest / "src")
 
 
 def environment() -> dict:

@@ -17,6 +17,9 @@ ml ${MAKE_DCONN_MODULES}
 ml list 2>&1
 
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-1}"
+# Import the code frozen in the run directory at submission, not the live repo.
+export PYTHONPATH="${RUN_DIR}/code/src${PYTHONPATH:+:${PYTHONPATH}}"
+export PYTHONDONTWRITEBYTECODE=1
 
 "${PYTHON}" -m make_dconn.cli run-array "${RUN_DIR}"
 
