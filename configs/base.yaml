@@ -51,5 +51,5 @@ slurm:
   zscore:
     partition: russpold
     time: "02:00:00"
-    cpus_per_task: 8
-    mem: 64G
+    cpus_per_task: 12
+    mem: 96G  # 33 GB matrix; the nBack test peaked at 67 GB in sacct (likely incl. file cache)
